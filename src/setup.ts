@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { agents } from '@kikedealba/kit'
-import { defineManifest, registerTool, unregisterTool, type ToolManifest } from '@kikedealba/kit/registry'
+import { defineManifest, registerTool, stableBin, unregisterTool, type ToolManifest } from '@kikedealba/kit/registry'
 import { PACKAGE_ROOT, VERSION } from './version.ts'
 
 export const CAPABILITIES = [
@@ -35,14 +35,18 @@ export function binCommand(): string[] {
   return [process.execPath, binEntry()]
 }
 
-export function manifest(httpUrl?: string | null): ToolManifest {
+export async function installedBin(): Promise<string[]> {
+  return stableBin('atl', VERSION, binCommand())
+}
+
+export function manifest(httpUrl?: string | null, bin: readonly string[] = binCommand()): ToolManifest {
   return defineManifest({
     name: 'atl',
     version: VERSION,
     description: 'Atlassian CLI and MCP server',
-    bin: binCommand(),
+    bin: [...bin],
     capabilities: CAPABILITIES,
-    mcp: { stdio: [...binCommand(), 'mcp'], ...(httpUrl ? { http: httpUrl } : {}) },
+    mcp: { stdio: [...bin, 'mcp'], ...(httpUrl ? { http: httpUrl } : {}) },
     homepage: 'https://github.com/KikeDeAlba/atl',
     install: INSTALL_HINT,
   })
@@ -50,13 +54,13 @@ export function manifest(httpUrl?: string | null): ToolManifest {
 
 export type McpMode = 'stdio' | 'http' | 'none'
 
-export function integration(mode: McpMode, http?: { url: string; token: string | null }): agents.AgentIntegration {
+export function integration(mode: McpMode, http?: { url: string; token: string | null }, bin: readonly string[] = binCommand()): agents.AgentIntegration {
   const mcp: agents.McpServer[] =
     mode === 'none'
       ? []
       : mode === 'http' && http
         ? [{ name: 'atl', url: http.url, ...(http.token ? { headers: { Authorization: `Bearer ${http.token}` } } : {}) }]
-        : [{ name: 'atl', command: [...binCommand(), 'mcp'] }]
+        : [{ name: 'atl', command: [...bin, 'mcp'] }]
   return {
     tool: 'atl',
     version: VERSION,
@@ -90,8 +94,8 @@ export function integration(mode: McpMode, http?: { url: string; token: string |
   }
 }
 
-export async function register(httpUrl?: string | null): Promise<string> {
-  return registerTool(manifest(httpUrl))
+export async function register(httpUrl?: string | null, bin?: readonly string[]): Promise<string> {
+  return registerTool(manifest(httpUrl, bin ?? (await installedBin())))
 }
 
 export async function unregister(): Promise<boolean> {

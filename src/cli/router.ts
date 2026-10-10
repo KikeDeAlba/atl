@@ -8,7 +8,7 @@ import { importFromBita } from '../core/import.ts'
 import { ToolContext } from '../tools/context.ts'
 import { TOOLS, findTool, toolInputSchema, type ToolDefinition } from '../tools/definitions.ts'
 import type { Schema } from '../tools/schema.ts'
-import { CAPABILITIES, integration, register, unregister, type McpMode } from '../setup.ts'
+import { CAPABILITIES, installedBin, integration, register, unregister, type McpMode } from '../setup.ts'
 import { SCHEMA_VERSION, VERSION } from '../version.ts'
 import { argsFromSchema, kebab, parseArgv, type ParsedArgs } from './args.ts'
 import { readSecret } from './prompt.ts'
@@ -221,10 +221,11 @@ async function setupCommand(io: Io, argv: readonly string[]): Promise<number> {
   const port = config.mcp?.port ?? 7781
   const httpUrl = `http://127.0.0.1:${port}/mcp`
   const token = mode === 'http' ? await ensureToken(false) : null
-  const manifestPath = await register(mode === 'http' ? httpUrl : null)
+  const bin = await installedBin()
+  const manifestPath = await register(mode === 'http' ? httpUrl : null, bin)
   const agentsFlag = flag(parsed, 'agents') ?? 'detected'
   const selection = agentsFlag === 'all' || agentsFlag === 'detected' ? agentsFlag : (agentsFlag.split(',').filter((name) => (agents.AGENTS as readonly string[]).includes(name)) as agents.AgentName[])
-  const steps = has(parsed, 'no-agents') ? [] : await agents.installIntegration(integration(mode, { url: httpUrl, token }), { agents: selection })
+  const steps = has(parsed, 'no-agents') ? [] : await agents.installIntegration(integration(mode, { url: httpUrl, token }, bin), { agents: selection })
   out(io, { manifest: manifestPath, mcp: mode, steps }, () =>
     [`registered in ${manifestPath}`, ...steps.map((step) => `${step.state === 'failed' || step.state === 'unavailable' ? '!' : '-'} ${step.agent}: ${step.detail}`), '', (config.sites.length === 0 ? 'Next: atl site add https://<name>.atlassian.net --email <you@company.com>' : `Sites: ${config.sites.map((site) => site.name).join(', ')}`), ...(mode === 'http' ? ['Start the shared server with: atl mcp serve'] : [])].join('\n'),
   )
