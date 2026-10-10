@@ -1,0 +1,63 @@
+{
+  "name": "@kikedealba/atl",
+  "version": "0.1.0",
+  "description": "Atlassian CLI and MCP server for Jira, Jira Software and Confluence Cloud, with multiple sites and the full REST API.",
+  "license": "MIT",
+  "author": "Jesus Enrique De Alba Gaytan",
+  "homepage": "https://github.com/KikeDeAlba/atl#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KikeDeAlba/atl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KikeDeAlba/atl/issues"
+  },
+  "keywords": [
+    "atlassian",
+    "jira",
+    "confluence",
+    "mcp",
+    "cli",
+    "claude-code",
+    "gemini-cli",
+    "codex",
+    "opencode"
+  ],
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "atl": "dist/bin/atl.js"
+  },
+  "files": [
+    "dist",
+    "skill",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-catalog.ts",
+    "prepack": "pnpm build",
+    "generate": "node scripts/generate.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "atl": "node src/bin/atl.ts"
+  },
+  "dependencies": {
+    "@kikedealba/kit": "^0.1.1",
+    "@mixmark-io/domino": "^2.2.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "marked": "^18.1.0",
+    "turndown": "^7.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/turndown": "^5.0.6",
+    "typescript": "^5.7.2"
+  }
+}
