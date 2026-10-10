@@ -1,6 +1,6 @@
 {
   "name": "@kikedealba/atl",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Atlassian CLI and MCP server for Jira, Jira Software and Confluence Cloud, with multiple sites and the full REST API.",
   "license": "MIT",
   "author": "Jesus Enrique De Alba Gaytan",
@@ -49,7 +49,7 @@
     "atl": "node src/bin/atl.ts"
   },
   "dependencies": {
-    "@kikedealba/kit": "^0.1.1",
+    "@kikedealba/kit": "^0.2.0",
     "@mixmark-io/domino": "^2.2.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "marked": "^18.1.0",
