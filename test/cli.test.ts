@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -76,4 +76,19 @@ test('setup registers atl and its MCP server in the agents', async (t) => {
   assert.equal(removed.code, 0)
   assert.equal(await readManifest('atl', platformContext({ env, home: dir })), null)
   assert.ok(!existsSync(path.join(dir, '.gemini', 'extensions', 'atl')))
+})
+
+test('setup registers the command on PATH when it is this same atl', async (t) => {
+  const dir = await tempDir(t)
+  const bin = path.join(dir, 'bin')
+  await mkdir(bin)
+  const shim = path.join(bin, process.platform === 'win32' ? 'atl.cmd' : 'atl')
+  await writeFile(shim, process.platform === 'win32' ? `@"${process.execPath}" "${BIN}" %*\r\n` : `#!/bin/sh\nexec "${process.execPath}" "${BIN}" "$@"\n`)
+  await chmod(shim, 0o755)
+  const env = { ...cliEnv(dir), HOME: dir, USERPROFILE: dir, PATH: [bin, path.dirname(process.execPath)].join(path.delimiter) }
+  const result = await atl(['setup', '--no-agents', '--json'], env)
+  assert.equal(result.code, 0, result.stdout + result.stderr)
+  const registered = await readManifest('atl', platformContext({ env, home: dir }))
+  assert.deepEqual(registered?.bin, [shim])
+  assert.deepEqual(registered?.mcp?.stdio, [shim, 'mcp'])
 })
