@@ -87,8 +87,9 @@ function help(): string {
     '  atl mcp token [--rotate]',
     '',
     'Setup:',
-    '  atl setup [--agents detected|all|claude,opencode,codex,gemini] [--mcp none|stdio|http]',
-    '                                                         default: skill + CLI, no MCP',
+    '  atl setup [--agents detected|all|claude,opencode,codex,gemini,claude-desktop] [--mcp none|stdio|http] [--no-desktop]',
+    '                                                         default: skill + CLI in coding agents, MCP in Claude Desktop',
+    '                                                         --mcp applies to coding agents only; restart Claude Desktop after setup',
     '  atl uninstall',
     '',
   ]
@@ -279,18 +280,21 @@ async function mcpCommand(io: Io, words: string[], argv: readonly string[]): Pro
 }
 
 async function setupCommand(io: Io, argv: readonly string[]): Promise<number> {
-  const parsed = parseArgv(argv, new Set(['no-agents']))
+  const parsed = parseArgv(argv, new Set(['no-agents', 'no-desktop']))
   const mode = (flag(parsed, 'mcp') ?? 'none') as McpMode
   if (!['stdio', 'http', 'none'].includes(mode)) throw usageError('--mcp must be stdio, http or none.')
+  const agentsFlag = flag(parsed, 'agents') ?? 'detected'
+  const names = agentsFlag.split(',').filter((name) => name.length > 0)
+  const unknown = names.filter((name) => !(agents.AGENTS as readonly string[]).includes(name))
+  if (agentsFlag !== 'all' && agentsFlag !== 'detected' && (names.length === 0 || unknown.length > 0)) throw usageError(`--agents takes detected, all or a list of ${agents.AGENTS.join(', ')}${unknown.length > 0 ? `; unknown: ${unknown.join(', ')}` : ''}.`)
+  const selection = agentsFlag === 'all' || agentsFlag === 'detected' ? agentsFlag : (names as agents.AgentName[])
   const config = await readConfig()
   const port = config.mcp?.port ?? 7781
   const httpUrl = `http://127.0.0.1:${port}/mcp`
   const token = mode === 'http' ? await ensureToken(false) : null
   const bin = await installedBin()
   const manifestPath = await register(mode === 'http' ? httpUrl : null, bin)
-  const agentsFlag = flag(parsed, 'agents') ?? 'detected'
-  const selection = agentsFlag === 'all' || agentsFlag === 'detected' ? agentsFlag : (agentsFlag.split(',').filter((name) => (agents.AGENTS as readonly string[]).includes(name)) as agents.AgentName[])
-  const steps = has(parsed, 'no-agents') ? [] : await setupAgents({ mode, http: { url: httpUrl, token }, bin, agents: selection })
+  const steps = has(parsed, 'no-agents') ? [] : await setupAgents({ mode, http: { url: httpUrl, token }, bin, agents: selection, desktop: !has(parsed, 'no-desktop') })
   out(io, { manifest: manifestPath, mcp: mode, steps }, () =>
     [`registered in ${manifestPath}`, ...steps.filter((step) => step.state !== 'skipped').map((step) => `${step.state === 'failed' || step.state === 'unavailable' ? '!' : '-'} ${step.agent}: ${step.detail}`), '', (config.sites.length === 0 ? 'Next: atl site add https://<name>.atlassian.net --email <you@company.com>' : `Sites: ${config.sites.map((site) => site.name).join(', ')}`), ...(mode === 'http' ? ['Start the shared server with: atl mcp serve'] : [])].join('\n'),
   )

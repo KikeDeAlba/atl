@@ -4,7 +4,7 @@ import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { test } from 'node:test'
 import { platformContext } from '@kikedealba/kit/platform'
-import { CLAUDE_PLUGIN, SKILL_DIR, setupAgents, uninstallAgents } from '../src/setup.ts'
+import { CLAUDE_PLUGIN, SKILL_DIR, integration, setupAgents, uninstallAgents } from '../src/setup.ts'
 import { tempDir } from './helpers.ts'
 
 interface Sandbox {
@@ -112,4 +112,49 @@ test('setup keeps the skill in Claude Code when the plugin cannot be installed',
   assert.ok(existsSync(path.join(box.dir, '.claude', 'skills', 'atl', 'SKILL.md')))
   const settings = JSON.parse(await readFile(path.join(box.dir, '.claude', 'settings.json'), 'utf8')) as { permissions: { allow: string[] } }
   assert.ok(settings.permissions.allow.includes('Bash(atl jira search:*)'))
+})
+
+test('integration in mode none gives MCP only to Claude Desktop', () => {
+  const bin = ['/Users/a/Library/pnpm/bin/atl']
+  const none = integration('none', undefined, bin)
+  assert.deepEqual(none.mcp, [])
+  assert.deepEqual(none.claudeDesktop, { mcp: [{ name: 'atl', command: ['/Users/a/Library/pnpm/bin/atl', 'mcp'] }] })
+  assert.deepEqual(integration('stdio', undefined, bin).claudeDesktop, none.claudeDesktop)
+})
+
+async function desktopSandbox(t: { after: (fn: () => Promise<void>) => void }): Promise<Sandbox & { config: string }> {
+  const box = await sandbox(t)
+  const ctx = platformContext({ env: box.options.ctx.env, home: box.dir, platform: 'darwin' })
+  const dir = path.join(box.dir, 'Library', 'Application Support', 'Claude')
+  await mkdir(dir, { recursive: true })
+  const config = path.join(dir, 'claude_desktop_config.json')
+  await writeFile(config, JSON.stringify({ preferences: { sidebarMode: 'chat' }, mcpServers: {} }))
+  return { ...box, options: { ...box.options, ctx }, config }
+}
+
+test('setup registers the MCP server in Claude Desktop and keeps the CLI agents without MCP', async (t) => {
+  const box = await desktopSandbox(t)
+  const bin = ['/usr/local/bin/atl']
+  const steps = await setupAgents({ mode: 'none', bin, ...box.options })
+  assert.ok(steps.some((step) => step.agent === 'claude-desktop' && step.state === 'installed'), JSON.stringify(steps, null, 2))
+  const config = JSON.parse(await readFile(box.config, 'utf8')) as { preferences: unknown; mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }> }
+  assert.deepEqual(config.preferences, { sidebarMode: 'chat' })
+  assert.equal(config.mcpServers['atl']?.command, '/usr/local/bin/atl')
+  assert.deepEqual(config.mcpServers['atl']?.args, ['mcp'])
+  assert.ok(config.mcpServers['atl']?.env['PATH']?.split(path.delimiter).includes(path.dirname(process.execPath)))
+  assert.ok(!box.calls.some((call) => call[1] === 'mcp' && call[2] === 'add'))
+  assert.ok(!steps.some((step) => step.state === 'failed'), JSON.stringify(steps, null, 2))
+
+  await uninstallAgents({ ...box.options, agents: ['claude-desktop'] })
+  const cleaned = JSON.parse(await readFile(box.config, 'utf8')) as { preferences: unknown; mcpServers: Record<string, unknown> }
+  assert.deepEqual(cleaned, { preferences: { sidebarMode: 'chat' }, mcpServers: {} })
+})
+
+test('setup --no-desktop leaves Claude Desktop alone', async (t) => {
+  const box = await desktopSandbox(t)
+  const steps = await setupAgents({ mode: 'stdio', bin: ['/usr/local/bin/atl'], desktop: false, ...box.options })
+  assert.ok(!steps.some((step) => step.agent === 'claude-desktop'))
+  assert.deepEqual(JSON.parse(await readFile(box.config, 'utf8')), { preferences: { sidebarMode: 'chat' }, mcpServers: {} })
+  const explicit = await setupAgents({ mode: 'none', agents: ['codex', 'claude-desktop'], desktop: false, ...box.options })
+  assert.ok(!explicit.some((step) => step.agent === 'claude-desktop'))
 })
