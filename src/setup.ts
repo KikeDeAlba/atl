@@ -90,6 +90,10 @@ function mcpServers(mode: McpMode, http: { url: string; token: string | null } |
   return [{ name: 'atl', command: [...bin, 'mcp'] }]
 }
 
+function desktopBin(bin: readonly string[]): readonly string[] {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin[0] ?? '') ? binCommand() : bin
+}
+
 export function integration(mode: McpMode, http?: { url: string; token: string | null }, bin: readonly string[] = binCommand()): agents.AgentIntegration {
   return {
     tool: 'atl',
@@ -98,6 +102,7 @@ export function integration(mode: McpMode, http?: { url: string; token: string |
     skills: [{ name: 'atl', dir: SKILL_DIR }],
     mcp: mcpServers(mode, http, bin),
     claude: { permissions: { allow: [...CLI_PERMISSIONS, ...MCP_PERMISSIONS] } },
+    claudeDesktop: { mcp: [{ name: 'atl', command: [...desktopBin(bin), 'mcp'] }] },
   }
 }
 
@@ -109,6 +114,7 @@ export interface AgentSetup extends agents.InstallOptions {
   mode: McpMode
   http?: { url: string; token: string | null }
   bin?: readonly string[]
+  desktop?: boolean
 }
 
 async function hasCodexMcp(homes: agents.AgentHomes): Promise<boolean> {
@@ -155,12 +161,13 @@ async function removeStaleMcp(targets: readonly agents.AgentName[], homes: agent
 }
 
 export async function setupAgents(setup: AgentSetup): Promise<agents.Step[]> {
-  const { mode, http, bin: givenBin, ...options } = setup
+  const { mode, http, bin: givenBin, desktop = true, ...options } = setup
   const bin = givenBin ?? binCommand()
   const ctx = options.ctx ?? platformContext()
   const homes = agents.agentHomes(ctx, options.homes)
   const wanted = options.agents ?? 'detected'
-  const selected = wanted === 'all' ? [...agents.AGENTS] : wanted === 'detected' ? await agents.detectAgents(ctx, homes, options.locate) : [...wanted]
+  const resolved = wanted === 'all' ? [...agents.AGENTS] : wanted === 'detected' ? await agents.detectAgents(ctx, homes, options.locate) : [...wanted]
+  const selected = desktop ? resolved : resolved.filter((agent) => agent !== 'claude-desktop')
   const base: agents.InstallOptions = { ...options, ctx }
   const steps: agents.Step[] = []
   if (selected.includes('claude')) {
