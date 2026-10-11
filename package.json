@@ -1,6 +1,6 @@
 {
   "name": "@kikedealba/atl",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Atlassian CLI and MCP server for Jira, Jira Software and Confluence Cloud, with multiple sites and the full REST API.",
   "license": "MIT",
   "author": "Jesus Enrique De Alba Gaytan",

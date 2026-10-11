@@ -1,6 +1,6 @@
 ---
 name: atl
-description: Trabaja con Jira, Jira Software y Confluence Cloud en uno o varios sitios de Atlassian por medio de la CLI atl. Úsala para leer, buscar, crear o editar issues, épicas, subtareas, worklogs, comentarios, transiciones, tableros y sprints, y para leer, publicar o actualizar páginas de Confluence a partir de Markdown. También cubre cualquier otra operación de las APIs REST de Jira y Confluence. Frases que la disparan: "crea la historia en Jira", "pasa esto a Confluence", "qué dice el ticket PP-123", "registra 2 horas en", "muévelo a hecho", "busca en Confluence", "publica esta página".
+description: Jira y Confluence Cloud con la CLI atl (issues, worklogs, transiciones, sprints y páginas). Frases como "crea la historia en Jira", "qué dice el ticket PP-123", "registra 2 horas en", "publica esta página".
 allowed-tools: Bash(atl site ls:*), Bash(atl jira issue get:*), Bash(atl jira search:*), Bash(atl jira comment ls:*), Bash(atl jira worklog ls:*), Bash(atl jira createmeta:*), Bash(atl jira issue transitions:*), Bash(atl confluence page get:*), Bash(atl confluence page find:*), Bash(atl confluence page tree:*), Bash(atl confluence search:*), Bash(atl api search:*), Bash(atl api describe:*), Bash(atl --version)
 ---
 
