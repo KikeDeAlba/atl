@@ -8,7 +8,7 @@ import { importFromBita } from '../core/import.ts'
 import { ToolContext } from '../tools/context.ts'
 import { TOOLS, findTool, toolInputSchema, type ToolDefinition } from '../tools/definitions.ts'
 import type { Schema } from '../tools/schema.ts'
-import { CAPABILITIES, installedBin, integration, register, unregister, type McpMode } from '../setup.ts'
+import { CAPABILITIES, installedBin, register, setupAgents, uninstallAgents, unregister, type McpMode } from '../setup.ts'
 import { SCHEMA_VERSION, VERSION } from '../version.ts'
 import { argsFromSchema, kebab, parseArgv, type ParsedArgs } from './args.ts'
 import { readSecret } from './prompt.ts'
@@ -52,10 +52,16 @@ function toolHelp(tool: ToolDefinition): string {
   const positionals = tool.cli.positionals ?? []
   const required = new Set(tool.required ?? [])
   const lines = [`atl ${tool.cli.path.join(' ')}${positionals.map((name) => (required.has(name) ? ` <${name}>` : ` [${name}]`)).join('')}`, '', tool.description, '']
+  const list = tool.cli.list
   for (const [name, schema] of Object.entries(properties)) {
     if (positionals.includes(name)) continue
+    if (list && (name === 'fields' || name === 'limit')) continue
     const type = schema['type'] === 'boolean' ? '' : ` <${String(schema['type'] ?? 'value')}>`
     lines.push(`  --${kebab(name)}${type}${required.has(name) ? ' (required)' : ''}  ${String(schema['description'] ?? '')}`)
+  }
+  if (list) {
+    lines.push(`  --fields <a,b,c|all>  Keys to keep in each result (default: ${list.compact ? list.compact.join(',') : 'all'}).`)
+    lines.push(`  --limit <integer>  ${String(properties['limit']?.['description'] ?? 'Maximum results.')}`)
   }
   lines.push('', 'String values accept @file, and @- reads stdin. Arrays take comma-separated values or JSON.', `MCP tool: ${tool.name}`)
   return lines.join('\n')
@@ -81,7 +87,8 @@ function help(): string {
     '  atl mcp token [--rotate]',
     '',
     'Setup:',
-    '  atl setup [--agents detected|all|claude,opencode,codex,gemini] [--mcp stdio|http|none]',
+    '  atl setup [--agents detected|all|claude,opencode,codex,gemini] [--mcp none|stdio|http]',
+    '                                                         default: skill + CLI, no MCP',
     '  atl uninstall',
     '',
   ]
@@ -91,7 +98,7 @@ function help(): string {
     for (const tool of tools) lines.push(`  atl ${[...tool.cli.path, ...(tool.cli.positionals ?? []).map((name) => ((tool.required ?? []).includes(name) ? `<${name}>` : `[${name}]`))].join(' ').padEnd(48)} ${tool.title}`)
     lines.push('')
   }
-  lines.push('Every command takes --site <name|url> and --json. "atl <command> --help" lists its options.')
+  lines.push('Every command takes --site <name|url> and --json. List commands take --limit <n> and --fields <a,b,c|all>', 'and return compact objects unless --fields asks for more. "atl <command> --help" lists its options.')
   return lines.join('\n')
 }
 
@@ -102,11 +109,69 @@ async function runTool(io: Io, tool: ToolDefinition, argv: readonly string[], ct
     process.stdout.write(`${toolHelp(tool)}\n`)
     return EXIT.ok
   }
+  const shape = tool.cli.list ? listShape(tool, parsed, properties) : null
   const args = argsFromSchema(parsed, properties, tool.cli.positionals ?? [])
+  if (shape) Object.assign(args, shape.args)
   const missing = (tool.required ?? []).filter((name) => args[name] === undefined)
   if (missing.length > 0) throw usageError(`Missing ${missing.map((name) => (tool.cli.positionals?.includes(name) ? `<${name}>` : `--${kebab(name)}`)).join(', ')}.`, `See "atl ${tool.cli.path.join(' ')} --help".`)
-  out(io, await tool.run(ctx, args))
+  const data = await tool.run(ctx, args)
+  if (shape) checkProjection(data, shape.fields)
+  out(io, shape ? project(data, shape.fields, shape.limit) : data)
   return EXIT.ok
+}
+
+interface ListShape {
+  fields: string[] | null
+  limit: number | null
+  args: Record<string, unknown>
+}
+
+function listShape(tool: ToolDefinition, parsed: ParsedArgs, properties: Record<string, Schema>): ListShape {
+  const list = tool.cli.list ?? {}
+  if (parsed.booleans.has('fields')) throw usageError('--fields needs a comma-separated list of keys, or "all".')
+  if (parsed.booleans.has('limit')) throw usageError('--limit needs a number.')
+  const rawFields = flag(parsed, 'fields')
+  const rawLimit = flag(parsed, 'limit')
+  parsed.flags.delete('fields')
+  parsed.flags.delete('limit')
+  const args: Record<string, unknown> = {}
+  let limit: number | null = null
+  if (rawLimit !== undefined) {
+    limit = Number(rawLimit)
+    if (!Number.isInteger(limit) || limit < 1) throw usageError(`--limit expects a positive integer, got "${rawLimit}".`)
+    if (properties['limit']) args['limit'] = limit
+  }
+  const requested = rawFields === undefined ? null : rawFields.split(',').map((item) => item.trim()).filter((item) => item.length > 0)
+  if (requested !== null && requested.length === 0) throw usageError('--fields needs a comma-separated list of keys, or "all".')
+  const fields = requested === null ? (list.compact ?? null) : requested.length === 1 && (requested[0] === 'all' || requested[0] === '*') ? null : requested
+  if (list.fetch && properties['fields']) {
+    const known = new Set(['id', 'key', 'url', ...Object.keys(list.fetch)])
+    const unknown = (fields ?? []).filter((name) => !known.has(name))
+    if (unknown.length > 0) throw usageError(`Unknown key${unknown.length > 1 ? 's' : ''} for --fields: ${unknown.join(', ')}.`, `Keys: ${[...known].join(', ')}, or "all".`)
+    const fetch = [...new Set((fields ?? Object.keys(list.fetch)).flatMap((name) => list.fetch?.[name] ?? []))]
+    args['fields'] = fetch.length > 0 ? fetch : ['summary']
+  }
+  return { fields, limit, args }
+}
+
+function checkProjection(data: unknown, fields: readonly string[] | null): void {
+  if (!fields || !Array.isArray(data)) return
+  const records = data.filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object' && !Array.isArray(item))
+  if (records.length === 0) return
+  const present = new Set(records.flatMap((record) => Object.keys(record)))
+  const unknown = fields.filter((name) => !present.has(name))
+  if (unknown.length > 0) throw usageError(`Unknown key${unknown.length > 1 ? 's' : ''} for --fields: ${unknown.join(', ')}.`, `Keys: ${[...present].join(', ')}, or "all".`)
+}
+
+export function project(data: unknown, fields: readonly string[] | null, limit: number | null): unknown {
+  if (!Array.isArray(data)) return data
+  const limited = limit === null ? data : data.slice(0, limit)
+  if (!fields) return limited
+  return limited.map((item: unknown) => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return item
+    const record = item as Record<string, unknown>
+    return Object.fromEntries(fields.filter((name) => name in record).map((name) => [name, record[name]]))
+  })
 }
 
 async function siteCommand(io: Io, words: string[], argv: readonly string[], ctx: ToolContext): Promise<number | null> {
@@ -215,7 +280,7 @@ async function mcpCommand(io: Io, words: string[], argv: readonly string[]): Pro
 
 async function setupCommand(io: Io, argv: readonly string[]): Promise<number> {
   const parsed = parseArgv(argv, new Set(['no-agents']))
-  const mode = (flag(parsed, 'mcp') ?? 'stdio') as McpMode
+  const mode = (flag(parsed, 'mcp') ?? 'none') as McpMode
   if (!['stdio', 'http', 'none'].includes(mode)) throw usageError('--mcp must be stdio, http or none.')
   const config = await readConfig()
   const port = config.mcp?.port ?? 7781
@@ -225,15 +290,15 @@ async function setupCommand(io: Io, argv: readonly string[]): Promise<number> {
   const manifestPath = await register(mode === 'http' ? httpUrl : null, bin)
   const agentsFlag = flag(parsed, 'agents') ?? 'detected'
   const selection = agentsFlag === 'all' || agentsFlag === 'detected' ? agentsFlag : (agentsFlag.split(',').filter((name) => (agents.AGENTS as readonly string[]).includes(name)) as agents.AgentName[])
-  const steps = has(parsed, 'no-agents') ? [] : await agents.installIntegration(integration(mode, { url: httpUrl, token }, bin), { agents: selection })
+  const steps = has(parsed, 'no-agents') ? [] : await setupAgents({ mode, http: { url: httpUrl, token }, bin, agents: selection })
   out(io, { manifest: manifestPath, mcp: mode, steps }, () =>
-    [`registered in ${manifestPath}`, ...steps.map((step) => `${step.state === 'failed' || step.state === 'unavailable' ? '!' : '-'} ${step.agent}: ${step.detail}`), '', (config.sites.length === 0 ? 'Next: atl site add https://<name>.atlassian.net --email <you@company.com>' : `Sites: ${config.sites.map((site) => site.name).join(', ')}`), ...(mode === 'http' ? ['Start the shared server with: atl mcp serve'] : [])].join('\n'),
+    [`registered in ${manifestPath}`, ...steps.filter((step) => step.state !== 'skipped').map((step) => `${step.state === 'failed' || step.state === 'unavailable' ? '!' : '-'} ${step.agent}: ${step.detail}`), '', (config.sites.length === 0 ? 'Next: atl site add https://<name>.atlassian.net --email <you@company.com>' : `Sites: ${config.sites.map((site) => site.name).join(', ')}`), ...(mode === 'http' ? ['Start the shared server with: atl mcp serve'] : [])].join('\n'),
   )
   return steps.some((step) => step.state === 'failed') ? EXIT.failure : EXIT.ok
 }
 
 async function uninstallCommand(io: Io): Promise<number> {
-  const steps = await agents.uninstallIntegration(integration('stdio'), { agents: 'all' })
+  const steps = await uninstallAgents()
   const removed = await unregister()
   out(io, { unregistered: removed, steps }, () => [`registry: ${removed ? 'removed' : 'not registered'}`, ...steps.filter((step) => step.state === 'removed').map((step) => `- ${step.agent}: ${step.detail}`), `Sites and tokens are kept in ${configPath()}; remove them with "atl site rm".`].join('\n'))
   return EXIT.ok

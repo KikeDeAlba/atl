@@ -59,10 +59,10 @@ test('a site added from the CLI is used by every command', async (t) => {
   assert.equal((JSON.parse(missing.stdout) as { error: { code: string } }).error.code, 'USAGE')
 })
 
-test('setup registers atl and its MCP server in the agents', async (t) => {
+test('setup --mcp stdio registers atl and its MCP server in the agents', async (t) => {
   const dir = await tempDir(t)
   const env = { ...cliEnv(dir), HOME: dir, USERPROFILE: dir, CLAUDE_CONFIG_DIR: path.join(dir, '.claude'), CODEX_HOME: path.join(dir, '.codex'), GEMINI_CLI_HOME: dir, PATH: path.dirname(process.execPath) }
-  const result = await atl(['setup', '--agents', 'codex,gemini', '--json'], env)
+  const result = await atl(['setup', '--agents', 'codex,gemini', '--mcp', 'stdio', '--json'], env)
   assert.equal(result.code, 0, result.stdout + result.stderr)
   const registered = await readManifest('atl', platformContext({ env, home: dir }))
   assert.ok(registered?.capabilities.includes('confluence.page.write'))
@@ -91,4 +91,61 @@ test('setup registers the command on PATH when it is this same atl', async (t) =
   const registered = await readManifest('atl', platformContext({ env, home: dir }))
   assert.deepEqual(registered?.bin, [shim])
   assert.deepEqual(registered?.mcp?.stdio, [shim, 'mcp'])
+})
+
+test('setup by default installs the skill only and removes the MCP server a previous install left', async (t) => {
+  const dir = await tempDir(t)
+  const env = { ...cliEnv(dir), HOME: dir, USERPROFILE: dir, CODEX_HOME: path.join(dir, '.codex'), KIT_AGENTS_HOME: path.join(dir, '.agents'), PATH: path.dirname(process.execPath) }
+  await mkdir(path.join(dir, '.codex'), { recursive: true })
+  await writeFile(path.join(dir, '.codex', 'config.toml'), '[mcp_servers.atl]\ncommand = "atl"\nargs = ["mcp"]\n')
+  const result = await atl(['setup', '--agents', 'codex', '--json'], env)
+  assert.equal(result.code, 0, result.stdout + result.stderr)
+  const envelope = JSON.parse(result.stdout) as { data: { mcp: string; steps: Array<{ agent: string; item: string; state: string }> } }
+  assert.equal(envelope.data.mcp, 'none')
+  assert.ok(envelope.data.steps.some((step) => step.agent === 'codex' && step.item === 'mcp atl' && step.state === 'removed'))
+  assert.doesNotMatch(await readFile(path.join(dir, '.codex', 'config.toml'), 'utf8'), /mcp_servers\.atl/)
+  assert.ok(existsSync(path.join(dir, '.agents', 'skills', 'atl', 'SKILL.md')))
+})
+
+test('list commands return compact objects and honor --fields and --limit', async (t) => {
+  const dir = await tempDir(t)
+  const env = { ...cliEnv(dir), ATL_SITE_URL: '', ATL_EMAIL: '', ATL_TOKEN: '' }
+  const issue = (n: number) => ({ id: String(n), key: `PP-${n}`, fields: { summary: `Issue ${n}`, status: { name: 'To Do', statusCategory: { key: 'new' } }, issuetype: { name: 'Task' }, project: { key: 'PP' }, assignee: { displayName: 'Ana' }, reporter: { displayName: 'Beto' }, priority: { name: 'Medium' }, labels: ['x'], created: '2026-10-01', updated: '2026-10-02', timetracking: { originalEstimateSeconds: 3600 } } })
+  const fake = await fakeAtlassian(t, (request) => {
+    if (request.path === '/rest/api/3/myself') return { body: { accountId: 'acc', displayName: 'Tester' } }
+    if (request.path === '/wiki/rest/api/user/current') return { body: { accountId: 'acc', displayName: 'Tester' } }
+    if (request.path === '/rest/api/3/search/jql') return { body: { issues: [issue(1), issue(2), issue(3)] } }
+    return undefined
+  })
+  assert.equal((await atl(['site', 'add', fake.url, '--email', 'me@x.com', '--name', 'local', '--token-stdin', '--json'], env, 'tok\n')).code, 0)
+
+  const compact = await atl(['jira', 'search', 'project = PP', '--json'], env)
+  assert.equal(compact.code, 0, compact.stderr)
+  const compactData = (JSON.parse(compact.stdout) as { data: Array<Record<string, unknown>> }).data
+  assert.deepEqual(compactData[0], { key: 'PP-1', summary: 'Issue 1', status: 'To Do', assignee: 'Ana' })
+  const firstBody = fake.requests.filter((request) => request.path === '/rest/api/3/search/jql').at(-1)?.body as { fields: string[] }
+  assert.deepEqual(firstBody.fields, ['summary', 'status', 'assignee'])
+
+  const picked = await atl(['jira', 'search', 'project = PP', '--fields', 'key,parentKey,originalEstimateSeconds', '--limit', '2', '--json'], env)
+  const pickedData = (JSON.parse(picked.stdout) as { data: Array<Record<string, unknown>> }).data
+  assert.deepEqual(pickedData, [{ key: 'PP-1', parentKey: null, originalEstimateSeconds: 3600 }, { key: 'PP-2', parentKey: null, originalEstimateSeconds: 3600 }])
+  const pickedBody = fake.requests.filter((request) => request.path === '/rest/api/3/search/jql').at(-1)?.body as { fields: string[]; maxResults: number }
+  assert.deepEqual(pickedBody.fields, ['parent', 'timetracking'])
+  assert.equal(pickedBody.maxResults, 2)
+
+  const full = await atl(['jira', 'search', 'project = PP', '--fields', 'all', '--json'], env)
+  const fullData = (JSON.parse(full.stdout) as { data: Array<Record<string, unknown>> }).data
+  assert.equal(fullData[0]?.['reporter'], 'Beto')
+  assert.ok(full.stdout.length > compact.stdout.length * 2)
+
+  const sites = await atl(['site', 'ls', '--fields', 'name', '--json'], env)
+  assert.deepEqual((JSON.parse(sites.stdout) as { data: unknown[] }).data, [{ name: 'local' }])
+
+  const bad = await atl(['jira', 'search', 'project = PP', '--limit', 'zero', '--json'], env)
+  assert.equal(bad.code, 2)
+  const typo = await atl(['jira', 'search', 'project = PP', '--fields', 'key,sumary', '--json'], env)
+  assert.equal(typo.code, 2)
+  assert.match(typo.stdout, /sumary/)
+  const fullBody = fake.requests.filter((request) => request.path === '/rest/api/3/search/jql').at(-1)?.body as { fields: string[] }
+  assert.ok(fullBody.fields.includes('description'))
 })
