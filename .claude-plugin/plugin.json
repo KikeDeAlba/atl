@@ -1,7 +1,7 @@
 {
   "name": "atl",
   "description": "Jira, Jira Software and Confluence Cloud through the atl CLI: one skill, no MCP server unless you opt in with atl setup --mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": {
     "name": "Jesus Enrique De Alba Gaytan",
     "url": "https://github.com/KikeDeAlba"
