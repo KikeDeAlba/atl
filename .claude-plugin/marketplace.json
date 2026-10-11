@@ -1,0 +1,18 @@
+{
+  "name": "atl",
+  "description": "Jira, Jira Software and Confluence Cloud through the atl CLI",
+  "owner": {
+    "name": "Jesus Enrique De Alba Gaytan",
+    "url": "https://github.com/KikeDeAlba"
+  },
+  "plugins": [
+    {
+      "name": "atl",
+      "description": "Read, search, create and edit Jira issues and Confluence pages with the atl CLI, with compact JSON output",
+      "source": "./",
+      "version": "0.2.0",
+      "category": "productivity",
+      "tags": ["atlassian", "jira", "confluence", "cli"]
+    }
+  ]
+}

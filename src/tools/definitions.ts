@@ -16,8 +16,26 @@ export interface ToolDefinition {
   network?: boolean
   readOnly?: boolean
   destructive?: boolean
-  cli: { path: string[]; positionals?: string[] }
+  cli: { path: string[]; positionals?: string[]; list?: { compact?: string[]; fetch?: Record<string, string[]> } }
   run(ctx: ToolContext, args: Record<string, unknown>): Promise<unknown>
+}
+
+const ISSUE_FETCH: Record<string, string[]> = {
+  summary: ['summary'],
+  status: ['status'],
+  statusCategory: ['status'],
+  issueType: ['issuetype'],
+  parentKey: ['parent'],
+  projectKey: ['project'],
+  assignee: ['assignee'],
+  reporter: ['reporter'],
+  priority: ['priority'],
+  labels: ['labels'],
+  description: ['description'],
+  originalEstimateSeconds: ['timetracking'],
+  timeSpentSeconds: ['timetracking'],
+  created: ['created'],
+  updated: ['updated'],
 }
 
 const SITE = s.string('Atlassian site name or URL. Defaults to the default site.')
@@ -99,7 +117,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: {},
     network: false,
     readOnly: true,
-    cli: { path: ['site', 'ls'] },
+    cli: { path: ['site', 'ls'], list: {} },
     run: async (ctx) => ctx.sites.list(),
   },
   {
@@ -117,7 +135,7 @@ export const TOOLS: ToolDefinition[] = [
     description: 'List Jira projects visible to the account, optionally filtered by name or key.',
     properties: { query: s.string('Filter by name or key.') },
     readOnly: true,
-    cli: { path: ['jira', 'project', 'ls'], positionals: ['query'] },
+    cli: { path: ['jira', 'project', 'ls'], positionals: ['query'], list: { compact: ['key', 'name'] } },
     run: async (ctx, args) => (await ctx.jira(site(args))).projects(text(args, 'query')),
   },
   {
@@ -141,7 +159,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { jql: s.string('JQL query.'), limit: s.integer('Maximum issues (default 50).'), fields: s.strings('Fields to fetch.') },
     required: ['jql'],
     readOnly: true,
-    cli: { path: ['jira', 'search'], positionals: ['jql'] },
+    cli: { path: ['jira', 'search'], positionals: ['jql'], list: { compact: ['key', 'summary', 'status', 'assignee'], fetch: ISSUE_FETCH } },
     run: async (ctx, args) => {
       const fields = list(args, 'fields')
       return (await ctx.jira(site(args))).search(need(args, 'jql'), { limit: integer(args, 'limit', 50) ?? 50, ...(fields ? { fields } : {}) })
@@ -243,7 +261,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { key: s.string('Issue key.') },
     required: ['key'],
     readOnly: true,
-    cli: { path: ['jira', 'issue', 'transitions'], positionals: ['key'] },
+    cli: { path: ['jira', 'issue', 'transitions'], positionals: ['key'], list: {} },
     run: async (ctx, args) => (await ctx.jira(site(args))).transitions(need(args, 'key')),
   },
   {
@@ -271,7 +289,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { key: s.string('Issue key.') },
     required: ['key'],
     readOnly: true,
-    cli: { path: ['jira', 'comment', 'ls'], positionals: ['key'] },
+    cli: { path: ['jira', 'comment', 'ls'], positionals: ['key'], list: {} },
     run: async (ctx, args) => (await ctx.jira(site(args))).comments(need(args, 'key')),
   },
   {
@@ -321,7 +339,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { key: s.string('Issue key.') },
     required: ['key'],
     readOnly: true,
-    cli: { path: ['jira', 'worklog', 'ls'], positionals: ['key'] },
+    cli: { path: ['jira', 'worklog', 'ls'], positionals: ['key'], list: {} },
     run: async (ctx, args) => (await ctx.jira(site(args))).worklogs(need(args, 'key')),
   },
   {
@@ -351,7 +369,7 @@ export const TOOLS: ToolDefinition[] = [
     description: 'List the issue link types of the site.',
     properties: {},
     readOnly: true,
-    cli: { path: ['jira', 'link-types'] },
+    cli: { path: ['jira', 'link-types'], list: {} },
     run: async (ctx, args) => (await ctx.jira(site(args))).linkTypes(),
   },
   {
@@ -379,7 +397,7 @@ export const TOOLS: ToolDefinition[] = [
     description: 'List Jira Software boards, optionally for one project.',
     properties: { project: s.string('Project key or id.') },
     readOnly: true,
-    cli: { path: ['jira', 'board', 'ls'], positionals: ['project'] },
+    cli: { path: ['jira', 'board', 'ls'], positionals: ['project'], list: {} },
     run: async (ctx, args) => (await ctx.jira(site(args))).boards(text(args, 'project')),
   },
   {
@@ -389,7 +407,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { board: s.integer('Board id.'), state: s.string('Comma-separated states.') },
     required: ['board'],
     readOnly: true,
-    cli: { path: ['jira', 'sprint', 'ls'], positionals: ['board'] },
+    cli: { path: ['jira', 'sprint', 'ls'], positionals: ['board'], list: { compact: ['id', 'name', 'state'] } },
     run: async (ctx, args) => (await ctx.jira(site(args))).sprints(integer(args, 'board') ?? 0, text(args, 'state')),
   },
   {
@@ -411,7 +429,7 @@ export const TOOLS: ToolDefinition[] = [
     description: 'List Confluence spaces, optionally only some keys.',
     properties: { keys: s.strings('Space keys.'), limit: s.integer('Maximum spaces (default 250).') },
     readOnly: true,
-    cli: { path: ['confluence', 'space', 'ls'] },
+    cli: { path: ['confluence', 'space', 'ls'], list: { compact: ['id', 'key', 'name', 'homepageId'] } },
     run: async (ctx, args) => {
       const keys = list(args, 'keys')
       return (await ctx.confluence(site(args))).spaces({ ...(keys ? { keys } : {}), limit: integer(args, 'limit', 250) ?? 250 })
@@ -497,7 +515,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { id: s.string('Page id.') },
     required: ['id'],
     readOnly: true,
-    cli: { path: ['confluence', 'page', 'children'], positionals: ['id'] },
+    cli: { path: ['confluence', 'page', 'children'], positionals: ['id'], list: { compact: ['id', 'title'] } },
     run: async (ctx, args) => (await ctx.confluence(site(args))).children(need(args, 'id')),
   },
   {
@@ -507,7 +525,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { id: s.string('Page id.'), depth: s.integer('Depth (default 5).') },
     required: ['id'],
     readOnly: true,
-    cli: { path: ['confluence', 'page', 'tree'], positionals: ['id'] },
+    cli: { path: ['confluence', 'page', 'tree'], positionals: ['id'], list: { compact: ['id', 'title', 'depth', 'parentId'] } },
     run: async (ctx, args) => (await ctx.confluence(site(args))).descendants(need(args, 'id'), integer(args, 'depth', 5) ?? 5),
   },
   {
@@ -517,7 +535,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { cql: s.string('CQL query.'), limit: s.integer('Maximum results (default 25).') },
     required: ['cql'],
     readOnly: true,
-    cli: { path: ['confluence', 'search'], positionals: ['cql'] },
+    cli: { path: ['confluence', 'search'], positionals: ['cql'], list: { compact: ['id', 'type', 'title', 'space'] } },
     run: async (ctx, args) => (await ctx.confluence(site(args))).search(need(args, 'cql'), integer(args, 'limit', 25) ?? 25),
   },
   {
@@ -536,7 +554,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { id: s.string('Page id.') },
     required: ['id'],
     readOnly: true,
-    cli: { path: ['confluence', 'attachment', 'ls'], positionals: ['id'] },
+    cli: { path: ['confluence', 'attachment', 'ls'], positionals: ['id'], list: {} },
     run: async (ctx, args) => (await ctx.confluence(site(args))).attachments(need(args, 'id')),
   },
   {
@@ -555,7 +573,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { id: s.string('Page id.') },
     required: ['id'],
     readOnly: true,
-    cli: { path: ['confluence', 'comment', 'ls'], positionals: ['id'] },
+    cli: { path: ['confluence', 'comment', 'ls'], positionals: ['id'], list: {} },
     run: async (ctx, args) => (await ctx.confluence(site(args))).footerComments(need(args, 'id')),
   },
   {
@@ -565,7 +583,7 @@ export const TOOLS: ToolDefinition[] = [
     properties: { id: s.string('Page id.') },
     required: ['id'],
     readOnly: true,
-    cli: { path: ['confluence', 'label', 'ls'], positionals: ['id'] },
+    cli: { path: ['confluence', 'label', 'ls'], positionals: ['id'], list: {} },
     run: async (ctx, args) => (await ctx.confluence(site(args))).labels(need(args, 'id')),
   },
   {
@@ -611,7 +629,7 @@ export const TOOLS: ToolDefinition[] = [
     required: ['query'],
     network: false,
     readOnly: true,
-    cli: { path: ['api', 'search'], positionals: ['query'] },
+    cli: { path: ['api', 'search'], positionals: ['query'], list: {} },
     run: async (_ctx, args) => {
       const product = text(args, 'product')
       if (product && !isProduct(product)) throw usageError(`Unknown product "${product}". Products: ${PRODUCTS.join(', ')}.`)
