@@ -41,9 +41,17 @@ encuentre:
 | Claude Code | El plugin `atl` desde el marketplace `KikeDeAlba/atl` (`claude plugin marketplace add` + `claude plugin install atl@atl`), con la skill. |
 | opencode, Codex | La skill `atl`. |
 | Gemini CLI | La extensión `atl` con la skill. |
+| Claude Desktop | El servidor MCP `atl` en `claude_desktop_config.json` (macOS y Windows). |
 
-Por defecto **no registra el servidor MCP** en ningún agente: el agente usa la
-CLI con la skill. Así no paga en cada sesión las definiciones de las 47
+La regla: **MCP en Claude Desktop, skill en los agentes de terminal**. Claude
+Desktop no tiene terminal, así que solo puede usar atl por MCP; `atl setup` lo
+registra ahí si encuentra la app, con el `PATH` del `node` que lo instaló para
+que el comando arranque aunque las apps gráficas no hereden el `PATH` de la
+terminal. Reinicia Claude Desktop después de `atl setup` para que lo cargue.
+`atl setup --no-desktop` no lo toca y `atl uninstall` lo quita.
+
+En Claude Code, opencode, Codex y Gemini **no registra el servidor MCP** por
+defecto: el agente usa la CLI con la skill. Así no paga en cada sesión las definiciones de las 47
 herramientas (unos 8.000 tokens en clientes que las cargan todas al arrancar,
 como Codex u opencode). Si una instalación anterior había registrado el MCP de
 atl en Claude Code, Codex, opencode o Gemini, `atl setup` lo quita y lo reporta.
@@ -60,10 +68,11 @@ claude plugin install atl@atl
 ### Cuándo activar el MCP
 
 `atl setup --mcp stdio` (o `--mcp http`) registra además el servidor MCP en los
-agentes. Conviene cuando:
+agentes de terminal; Claude Desktop lo recibe siempre, con o sin `--mcp`.
+Conviene cuando:
 
-- el cliente no tiene terminal: **Claude Desktop o claude.ai** (conector
-  personalizado), u otro cliente que solo habla MCP;
+- el cliente no tiene terminal y no es Claude Desktop: **claude.ai** (conector
+  personalizado) u otro cliente que solo habla MCP;
 - quieres que **varios clientes compartan un solo servidor HTTP**
   (`atl setup --mcp http` y después `atl mcp serve`);
 - el agente no puede o no debe correr comandos de shell.

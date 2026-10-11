@@ -149,3 +149,11 @@ test('list commands return compact objects and honor --fields and --limit', asyn
   const fullBody = fake.requests.filter((request) => request.path === '/rest/api/3/search/jql').at(-1)?.body as { fields: string[] }
   assert.ok(fullBody.fields.includes('description'))
 })
+
+test('setup rejects unknown agents', async (t) => {
+  const dir = await tempDir(t)
+  const env = { ...cliEnv(dir), HOME: dir, USERPROFILE: dir, PATH: path.dirname(process.execPath) }
+  const result = await atl(['setup', '--agents', 'claude-dekstop', '--json'], env)
+  assert.equal(result.code, 2, result.stdout + result.stderr)
+  assert.match((JSON.parse(result.stdout) as { error: { message: string } }).error.message, /claude-desktop/)
+})
