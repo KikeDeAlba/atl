@@ -3,14 +3,15 @@
 Jira, Jira Software y Confluence Cloud desde la terminal y como servidor MCP,
 con varios sitios de Atlassian a la vez y la API REST completa.
 
-- **CLI** con salida JSON (`--json`) para scripts y agentes.
-- **Servidor MCP** por stdio (un cliente) o por HTTP local (varios clientes a la
-  vez, con token).
+- **CLI** con salida JSON (`--json`) compacta para scripts y agentes. Es el
+  camino por defecto: los agentes la usan a través de una skill.
+- **Servidor MCP** opcional, por stdio (un cliente) o por HTTP local (varios
+  clientes a la vez, con token).
 - **Varios sitios**: cada uno con su cuenta y su API token, guardado en el
   llavero del sistema.
 - **Markdown** de entrada y salida: atl convierte a Atlassian Document Format
   (Jira) y a storage (Confluence).
-- **Toda la API**: 43 herramientas curadas para lo de todos los días y acceso a
+- **Toda la API**: 47 herramientas curadas para lo de todos los días y acceso a
   las 1073 operaciones REST de Jira, Jira Software y Confluence (v2 y v1),
   generadas desde los OpenAPI oficiales.
 
@@ -32,8 +33,42 @@ atl site add https://<empresa>.atlassian.net --email <tu@empresa.com>
 <https://id.atlassian.com/manage-profile/security/api-tokens>). También se puede
 pasar por stdin: `pbpaste | atl site add <url> --email <correo> --token-stdin`.
 
-`atl setup` registra atl en el registro de kit e instala la skill y el servidor
-MCP en los agentes que encuentre: **Claude Code, opencode, Codex y Gemini CLI**.
+`atl setup` registra atl en el registro de kit y lo conecta con los agentes que
+encuentre:
+
+| Agente | Qué instala |
+|---|---|
+| Claude Code | El plugin `atl` desde el marketplace `KikeDeAlba/atl` (`claude plugin marketplace add` + `claude plugin install atl@atl`), con la skill. |
+| opencode, Codex | La skill `atl`. |
+| Gemini CLI | La extensión `atl` con la skill. |
+
+Por defecto **no registra el servidor MCP** en ningún agente: el agente usa la
+CLI con la skill. Así no paga en cada sesión las definiciones de las 47
+herramientas (unos 8.000 tokens en clientes que las cargan todas al arrancar,
+como Codex u opencode). Si una instalación anterior había registrado el MCP de
+atl en Claude Code, Codex, opencode o Gemini, `atl setup` lo quita y lo reporta.
+También quita los archivos sueltos que versiones anteriores dejaban en
+`~/.claude` (la skill enlazada y sus permisos), porque ahora los trae el plugin.
+
+En Claude Code también se puede instalar el plugin a mano:
+
+```sh
+claude plugin marketplace add KikeDeAlba/atl
+claude plugin install atl@atl
+```
+
+### Cuándo activar el MCP
+
+`atl setup --mcp stdio` (o `--mcp http`) registra además el servidor MCP en los
+agentes. Conviene cuando:
+
+- el cliente no tiene terminal: **Claude Desktop o claude.ai** (conector
+  personalizado), u otro cliente que solo habla MCP;
+- quieres que **varios clientes compartan un solo servidor HTTP**
+  (`atl setup --mcp http` y después `atl mcp serve`);
+- el agente no puede o no debe correr comandos de shell.
+
+Para volver al modo por defecto: `atl setup` (o `atl setup --mcp none`).
 
 Si ya usabas bita, `atl site import --from-bita` copia sus sitios y tokens.
 
@@ -62,7 +97,7 @@ Para CI, sin configuración: `ATL_SITE_URL`, `ATL_EMAIL` y `ATL_TOKEN`.
 
 ```sh
 atl jira issue get PP-123
-atl jira search "project = PP AND status != Done" --limit 20
+atl jira search "project = PP AND status != Done" --limit 20 --fields key,summary,status
 atl jira issue create --project PP --type Story --summary "Login con SSO" --description @historia.md --estimate 3h
 atl jira issue create-many --project PP --issues @plan.json
 atl jira issue transition PP-123 done --comment "Listo en develop"
@@ -79,6 +114,12 @@ atl api describe jira.createVersion
 atl api call jira.createVersion --args '{"body":{"name":"1.4.0","projectId":10000}}'
 ```
 
+- Los listados (`jira search`, `confluence search`, `confluence page tree`,
+  `confluence space ls`, `jira comment ls`, …) aceptan `--limit <n>` y
+  `--fields a,b,c`. Sin `--fields` devuelven objetos compactos (`jira search`:
+  `key, summary, status, assignee`); `--fields all` trae el objeto completo. En
+  `jira search`, atl solo le pide a Jira los campos que corresponden a las
+  claves pedidas. Las herramientas MCP no cambian: devuelven el objeto completo.
 - Cualquier valor de texto acepta `@archivo`, y `@-` lo lee de stdin.
 - Las listas van separadas por comas o como JSON.
 - `atl <comando> --help` lista sus opciones; `atl help` lista todos.
@@ -107,6 +148,7 @@ atl mcp token                 # token Bearer del servidor HTTP
 | `--all-operations` | Expone además cada operación REST como herramienta propia (`op_jira_createVersion`, …). Por defecto se llega a ellas con `api_search` → `api_describe` → `api_call`, para no llenar el contexto del agente con mil herramientas. |
 | `--port`, `--host` | Dónde escucha el HTTP. Fuera de localhost exige token. |
 
+El servidor MCP es opcional (ver [Cuándo activar el MCP](#cuándo-activar-el-mcp)).
 Para que todos los agentes compartan un solo servidor HTTP:
 `atl setup --mcp http` y después `atl mcp serve`.
 
