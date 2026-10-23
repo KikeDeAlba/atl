@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import os from 'node:os'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { agents } from '@kikedealba/kit'
 import { platformContext } from '@kikedealba/kit/platform'
@@ -61,9 +60,7 @@ export const CLAUDE_PLUGIN = { marketplace: 'KikeDeAlba/atl', marketplaceName: '
 
 export const SKILL_DIR = path.join(PACKAGE_ROOT, 'skills', 'atl')
 
-export async function antigravityRules(): Promise<string> {
-  return agents.parseFrontmatter(await readFile(path.join(SKILL_DIR, 'SKILL.md'), 'utf8')).body.trimStart().replaceAll('](reference.md)', '](../skills/atl/reference.md)')
-}
+export const ANTIGRAVITY_RULES = path.join(PACKAGE_ROOT, 'rules', 'antigravity.md')
 
 const CLI_PERMISSIONS = [
   'Bash(atl site ls:*)',
@@ -99,7 +96,7 @@ function desktopBin(bin: readonly string[]): readonly string[] {
   return process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin[0] ?? '') ? binCommand() : bin
 }
 
-export function integration(mode: McpMode, http?: { url: string; token: string | null }, bin: readonly string[] = binCommand(), rules?: string): agents.AgentIntegration {
+export function integration(mode: McpMode, http?: { url: string; token: string | null }, bin: readonly string[] = binCommand()): agents.AgentIntegration {
   return {
     tool: 'atl',
     version: VERSION,
@@ -108,7 +105,7 @@ export function integration(mode: McpMode, http?: { url: string; token: string |
     mcp: mcpServers(mode, http, bin),
     claude: { permissions: { allow: [...CLI_PERMISSIONS, ...MCP_PERMISSIONS] } },
     claudeDesktop: { mcp: [{ name: 'atl', command: [...desktopBin(bin), 'mcp'] }] },
-    ...(rules ? { antigravity: { rules } } : {}),
+    antigravity: { rules: ANTIGRAVITY_RULES },
   }
 }
 
@@ -182,18 +179,6 @@ async function removeStaleMcp(targets: readonly agents.AgentName[], homes: agent
   return steps
 }
 
-async function withAntigravityRules<T>(targets: readonly agents.AgentName[], run: (rules?: string) => Promise<T>): Promise<T> {
-  if (!targets.includes('antigravity')) return run()
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'atl-rules-'))
-  try {
-    const file = path.join(dir, 'atl.md')
-    await writeFile(file, await antigravityRules())
-    return await run(file)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-}
-
 export async function setupAgents(setup: AgentSetup): Promise<agents.Step[]> {
   const { mode, http, bin: givenBin, desktop = true, ...options } = setup
   const bin = givenBin ?? binCommand()
@@ -220,7 +205,7 @@ export async function setupAgents(setup: AgentSetup): Promise<agents.Step[]> {
   if (others.length > 0) {
     const geminiHadMcp = mode === 'none' && others.includes('gemini') && (await hasGeminiMcp(homes))
     if (mode === 'none') steps.push(...(await removeStaleMcp(others, homes, base)))
-    const installed = await withAntigravityRules(others, (rules) => agents.installIntegration(integration(mode, http, bin, rules), { ...base, agents: others }))
+    const installed = await agents.installIntegration(integration(mode, http, bin), { ...base, agents: others })
     steps.push(...installed)
     if (geminiHadMcp && installed.some((step) => step.agent === 'gemini' && step.item === 'extension' && step.state === 'installed')) {
       steps.push({ agent: 'gemini', item: 'mcp atl', state: 'removed', detail: 'MCP server atl dropped from the Gemini extension', path: path.join(homes.gemini, 'extensions', 'atl', 'gemini-extension.json') })

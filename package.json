@@ -36,6 +36,7 @@
   "files": [
     "dist",
     "skills",
+    "rules",
     ".claude-plugin",
     "README.md",
     "LICENSE"

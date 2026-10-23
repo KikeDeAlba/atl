@@ -5,7 +5,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { agents } from '@kikedealba/kit'
 import { platformContext } from '@kikedealba/kit/platform'
-import { CLAUDE_PLUGIN, SKILL_DIR, antigravityRules, integration, setupAgents, uninstallAgents } from '../src/setup.ts'
+import { CLAUDE_PLUGIN, ANTIGRAVITY_RULES, SKILL_DIR, integration, setupAgents, uninstallAgents } from '../src/setup.ts'
 import { tempDir } from './helpers.ts'
 
 interface Sandbox {
@@ -84,15 +84,14 @@ test('setup installs the Claude Code plugin and drops every MCP server a previou
   assert.ok(!steps.some((step) => step.state === 'failed'), JSON.stringify(steps, null, 2))
 })
 
-test('setup gives Antigravity the skill as an always_on rule', async (t) => {
+test('setup gives Antigravity a short always_on rule that points to the skill', async (t) => {
   const box = await sandbox(t, false)
   const steps = await setupAgents({ mode: 'none', agents: ['antigravity'], ...box.options })
   const rules = await readFile(path.join(antigravityPlugin(box.dir), 'rules', 'atl.md'), 'utf8')
-  assert.match(rules, /^---\ntrigger: always_on\n---\n# atl\n/)
-  assert.ok(!rules.includes('allowed-tools'))
-  assert.ok(rules.includes('](../skills/atl/reference.md)'))
-  assert.ok(existsSync(path.join(antigravityPlugin(box.dir), 'skills', 'atl', 'reference.md')))
-  assert.equal(rules.split('\n').slice(3).join('\n'), await antigravityRules())
+  assert.equal(rules, `---\ntrigger: always_on\n---\n${await readFile(ANTIGRAVITY_RULES, 'utf8')}`)
+  assert.ok(rules.includes('skill `atl`'))
+  assert.ok(rules.trim().split('\n').length <= 7)
+  assert.ok(existsSync(path.join(antigravityPlugin(box.dir), 'skills', 'atl', 'SKILL.md')))
   assert.ok(steps.some((step) => step.agent === 'antigravity' && step.item === 'plugin' && step.state === 'unavailable'))
   assert.ok(!steps.some((step) => step.item === 'mcp atl'))
 })

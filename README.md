@@ -41,7 +41,7 @@ encuentre:
 | Claude Code | El plugin `atl` desde el marketplace `KikeDeAlba/atl` (`claude plugin marketplace add` + `claude plugin install atl@atl`), con la skill. |
 | opencode, Codex | La skill `atl`. |
 | Gemini CLI | La extensión `atl` con la skill. |
-| Antigravity CLI (`agy`) | El plugin `atl` con la skill y una regla `always_on` con su contenido, instalado con `agy plugin install`. |
+| Antigravity CLI (`agy`) | El plugin `atl` con la skill y una regla `always_on` corta que remite a ella, instalado con `agy plugin install`. |
 | Claude Desktop | El servidor MCP `atl` en `claude_desktop_config.json` (macOS y Windows). |
 
 La regla: **MCP en Claude Desktop, skill en los agentes de terminal**. Claude
