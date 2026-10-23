@@ -3,8 +3,9 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { test } from 'node:test'
+import { agents } from '@kikedealba/kit'
 import { platformContext } from '@kikedealba/kit/platform'
-import { CLAUDE_PLUGIN, SKILL_DIR, integration, setupAgents, uninstallAgents } from '../src/setup.ts'
+import { CLAUDE_PLUGIN, SKILL_DIR, antigravityRules, integration, setupAgents, uninstallAgents } from '../src/setup.ts'
 import { tempDir } from './helpers.ts'
 
 interface Sandbox {
@@ -39,6 +40,14 @@ async function legacyInstall(dir: string): Promise<void> {
   await writeFile(path.join(dir, '.config', 'opencode', 'opencode.json'), JSON.stringify({ $schema: 'https://opencode.ai/config.json', mcp: { atl: { type: 'local', command: ['atl', 'mcp'], enabled: true }, other: { type: 'local', command: ['other'] } } }))
   await mkdir(path.join(dir, '.gemini', 'extensions', 'atl'), { recursive: true })
   await writeFile(path.join(dir, '.gemini', 'extensions', 'atl', 'gemini-extension.json'), JSON.stringify({ name: 'atl', version: '0.1.1', mcpServers: { atl: { command: 'atl', args: ['mcp'] } } }))
+  await mkdir(path.join(dir, '.gemini', 'config'), { recursive: true })
+  await writeFile(path.join(dir, '.gemini', 'config', 'mcp_config.json'), JSON.stringify({ mcpServers: { atl: { command: 'atl', args: ['mcp'], disabled: false, [agents.ANTIGRAVITY_MCP_MARKER]: 'atl' }, other: { command: 'other', args: [] } } }))
+}
+
+const CODING_AGENTS = agents.AGENTS.filter((agent) => agent !== 'claude-desktop')
+
+function antigravityPlugin(dir: string): string {
+  return path.join(dir, '.local', 'share', 'kikedealba', 'agents', 'antigravity', 'atl')
 }
 
 test('setup installs the Claude Code plugin and drops every MCP server a previous install registered', async (t) => {
@@ -62,18 +71,45 @@ test('setup installs the Claude Code plugin and drops every MCP server a previou
   assert.deepEqual(Object.keys(opencode.mcp), ['other'])
   const gemini = JSON.parse(await readFile(path.join(box.dir, '.gemini', 'extensions', 'atl', 'gemini-extension.json'), 'utf8')) as { mcpServers?: unknown }
   assert.equal(gemini.mcpServers, undefined)
+  const antigravity = JSON.parse(await readFile(path.join(box.dir, '.gemini', 'config', 'mcp_config.json'), 'utf8')) as { mcpServers: Record<string, unknown> }
+  assert.deepEqual(Object.keys(antigravity.mcpServers), ['other'])
+  assert.ok(!box.calls.some((call) => call[0] === 'agy'))
 
   const removed = steps.filter((step) => step.item === 'mcp atl' && step.state === 'removed').map((step) => step.agent).sort()
-  assert.deepEqual(removed, ['claude', 'codex', 'gemini', 'opencode'])
+  assert.deepEqual(removed, [...CODING_AGENTS].sort())
   assert.ok(existsSync(path.join(box.dir, '.agents', 'skills', 'atl', 'SKILL.md')))
   assert.ok(existsSync(path.join(box.dir, '.config', 'opencode', 'skills', 'atl', 'SKILL.md')))
   assert.ok(existsSync(path.join(box.dir, '.gemini', 'extensions', 'atl', 'skills', 'atl', 'SKILL.md')))
+  assert.ok(existsSync(path.join(antigravityPlugin(box.dir), 'skills', 'atl', 'SKILL.md')))
   assert.ok(!steps.some((step) => step.state === 'failed'), JSON.stringify(steps, null, 2))
+})
+
+test('setup gives Antigravity the skill as an always_on rule', async (t) => {
+  const box = await sandbox(t, false)
+  const steps = await setupAgents({ mode: 'none', agents: ['antigravity'], ...box.options })
+  const rules = await readFile(path.join(antigravityPlugin(box.dir), 'rules', 'atl.md'), 'utf8')
+  assert.match(rules, /^---\ntrigger: always_on\n---\n# atl\n/)
+  assert.ok(!rules.includes('allowed-tools'))
+  assert.ok(rules.includes('](../skills/atl/reference.md)'))
+  assert.ok(existsSync(path.join(antigravityPlugin(box.dir), 'skills', 'atl', 'reference.md')))
+  assert.equal(rules.split('\n').slice(3).join('\n'), await antigravityRules())
+  assert.ok(steps.some((step) => step.agent === 'antigravity' && step.item === 'plugin' && step.state === 'unavailable'))
+  assert.ok(!steps.some((step) => step.item === 'mcp atl'))
+})
+
+test('setup leaves an Antigravity MCP server it does not own alone', async (t) => {
+  const box = await sandbox(t, false)
+  const file = path.join(box.dir, '.gemini', 'config', 'mcp_config.json')
+  await mkdir(path.dirname(file), { recursive: true })
+  await writeFile(file, JSON.stringify({ mcpServers: { atl: { command: 'atl', args: ['mcp'] } } }))
+  const steps = await setupAgents({ mode: 'none', agents: ['antigravity'], ...box.options })
+  assert.deepEqual(Object.keys((JSON.parse(await readFile(file, 'utf8')) as { mcpServers: Record<string, unknown> }).mcpServers), ['atl'])
+  assert.ok(!steps.some((step) => step.item === 'mcp atl' && step.state === 'removed'))
 })
 
 test('setup without a previous MCP server reports nothing removed', async (t) => {
   const box = await sandbox(t, false)
-  const steps = await setupAgents({ mode: 'none', agents: ['claude', 'codex', 'opencode'], ...box.options })
+  const steps = await setupAgents({ mode: 'none', agents: ['claude', 'codex', 'opencode', 'antigravity'], ...box.options })
   assert.ok(!steps.some((step) => step.item === 'mcp atl' && step.state === 'removed'), JSON.stringify(steps, null, 2))
   assert.ok(!existsSync(path.join(box.dir, '.codex', 'config.toml')))
 })
@@ -95,6 +131,9 @@ test('setup --mcp stdio registers the server everywhere on top of the plugin', a
   assert.deepEqual(opencode.mcp['atl']?.command, ['/usr/local/bin/atl', 'mcp'])
   const gemini = JSON.parse(await readFile(path.join(box.dir, '.gemini', 'extensions', 'atl', 'gemini-extension.json'), 'utf8')) as { mcpServers: Record<string, { args: string[] }> }
   assert.deepEqual(gemini.mcpServers['atl']?.args, ['mcp'])
+  const antigravity = JSON.parse(await readFile(path.join(box.dir, '.gemini', 'config', 'mcp_config.json'), 'utf8')) as { mcpServers: Record<string, { command: string; args: string[] }> }
+  assert.deepEqual(antigravity.mcpServers['atl'], { command: '/usr/local/bin/atl', args: ['mcp'], disabled: false, [agents.ANTIGRAVITY_MCP_MARKER]: 'atl' })
+  assert.deepEqual(Object.keys(antigravity.mcpServers).sort(), ['atl', 'other'])
 })
 
 test('uninstall removes the Claude Code plugin', async (t) => {

@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { agents } from '@kikedealba/kit'
 import { platformContext } from '@kikedealba/kit/platform'
@@ -60,6 +61,10 @@ export const CLAUDE_PLUGIN = { marketplace: 'KikeDeAlba/atl', marketplaceName: '
 
 export const SKILL_DIR = path.join(PACKAGE_ROOT, 'skills', 'atl')
 
+export async function antigravityRules(): Promise<string> {
+  return agents.parseFrontmatter(await readFile(path.join(SKILL_DIR, 'SKILL.md'), 'utf8')).body.trimStart().replaceAll('](reference.md)', '](../skills/atl/reference.md)')
+}
+
 const CLI_PERMISSIONS = [
   'Bash(atl site ls:*)',
   'Bash(atl jira issue get:*)',
@@ -94,7 +99,7 @@ function desktopBin(bin: readonly string[]): readonly string[] {
   return process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin[0] ?? '') ? binCommand() : bin
 }
 
-export function integration(mode: McpMode, http?: { url: string; token: string | null }, bin: readonly string[] = binCommand()): agents.AgentIntegration {
+export function integration(mode: McpMode, http?: { url: string; token: string | null }, bin: readonly string[] = binCommand(), rules?: string): agents.AgentIntegration {
   return {
     tool: 'atl',
     version: VERSION,
@@ -103,6 +108,7 @@ export function integration(mode: McpMode, http?: { url: string; token: string |
     mcp: mcpServers(mode, http, bin),
     claude: { permissions: { allow: [...CLI_PERMISSIONS, ...MCP_PERMISSIONS] } },
     claudeDesktop: { mcp: [{ name: 'atl', command: [...desktopBin(bin), 'mcp'] }] },
+    ...(rules ? { antigravity: { rules } } : {}),
   }
 }
 
@@ -116,6 +122,8 @@ export interface AgentSetup extends agents.InstallOptions {
   bin?: readonly string[]
   desktop?: boolean
 }
+
+const STALE_MCP: agents.AgentIntegration = { tool: 'atl', version: VERSION, mcp: [{ name: 'atl', command: ['atl', 'mcp'] }] }
 
 async function hasCodexMcp(homes: agents.AgentHomes): Promise<boolean> {
   const file = path.join(homes.codex, 'config.toml')
@@ -148,16 +156,42 @@ async function hasGeminiMcp(homes: agents.AgentHomes): Promise<boolean> {
   }
 }
 
+async function hasAntigravityMcp(homes: agents.AgentHomes): Promise<boolean> {
+  const file = path.join(homes.antigravity, 'mcp_config.json')
+  if (!existsSync(file)) return false
+  try {
+    const value = JSON.parse(await readFile(file, 'utf8')) as { mcpServers?: Record<string, Record<string, unknown> | null> }
+    return value.mcpServers?.['atl']?.[agents.ANTIGRAVITY_MCP_MARKER] === 'atl'
+  } catch {
+    return false
+  }
+}
+
 async function removeStaleMcp(targets: readonly agents.AgentName[], homes: agents.AgentHomes, options: agents.InstallOptions): Promise<agents.Step[]> {
   const steps: agents.Step[] = []
   const stale: agents.AgentName[] = []
   if (targets.includes('codex') && (await hasCodexMcp(homes))) stale.push('codex')
   if (targets.includes('opencode') && (await hasOpenCodeMcp(homes))) stale.push('opencode')
   if (stale.length > 0) {
-    const only: agents.AgentIntegration = { tool: 'atl', version: VERSION, mcp: [{ name: 'atl', command: ['atl', 'mcp'] }] }
-    steps.push(...(await agents.uninstallIntegration(only, { ...options, agents: stale })))
+    steps.push(...(await agents.uninstallIntegration(STALE_MCP, { ...options, agents: stale })))
+  }
+  if (targets.includes('antigravity') && (await hasAntigravityMcp(homes))) {
+    const removed = await agents.uninstallIntegration(STALE_MCP, { ...options, agents: ['antigravity'], locate: async () => null })
+    steps.push(...removed.filter((step) => step.item === 'mcp atl'))
   }
   return steps
+}
+
+async function withAntigravityRules<T>(targets: readonly agents.AgentName[], run: (rules?: string) => Promise<T>): Promise<T> {
+  if (!targets.includes('antigravity')) return run()
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'atl-rules-'))
+  try {
+    const file = path.join(dir, 'atl.md')
+    await writeFile(file, await antigravityRules())
+    return await run(file)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 }
 
 export async function setupAgents(setup: AgentSetup): Promise<agents.Step[]> {
@@ -173,10 +207,9 @@ export async function setupAgents(setup: AgentSetup): Promise<agents.Step[]> {
   if (selected.includes('claude')) {
     const plugin = await agents.installClaudePlugin(CLAUDE_PLUGIN, base)
     steps.push(...plugin)
-    const staleMcp: agents.AgentIntegration = { tool: 'atl', version: VERSION, mcp: [{ name: 'atl', command: ['atl', 'mcp'] }] }
     if (plugin.some((step) => step.state === 'failed' || step.state === 'unavailable')) {
       steps.push(...(await agents.installIntegration(integration(mode, http, bin), { ...base, agents: ['claude'] })))
-      if (mode === 'none') steps.push(...(await agents.removeLegacyClaude(staleMcp, base)))
+      if (mode === 'none') steps.push(...(await agents.removeLegacyClaude(STALE_MCP, base)))
     } else {
       const legacy = integration('stdio', undefined, bin)
       steps.push(...(await agents.removeLegacyClaude(mode === 'none' ? legacy : { ...legacy, mcp: [] }, base)))
@@ -187,7 +220,7 @@ export async function setupAgents(setup: AgentSetup): Promise<agents.Step[]> {
   if (others.length > 0) {
     const geminiHadMcp = mode === 'none' && others.includes('gemini') && (await hasGeminiMcp(homes))
     if (mode === 'none') steps.push(...(await removeStaleMcp(others, homes, base)))
-    const installed = await agents.installIntegration(integration(mode, http, bin), { ...base, agents: others })
+    const installed = await withAntigravityRules(others, (rules) => agents.installIntegration(integration(mode, http, bin, rules), { ...base, agents: others }))
     steps.push(...installed)
     if (geminiHadMcp && installed.some((step) => step.agent === 'gemini' && step.item === 'extension' && step.state === 'installed')) {
       steps.push({ agent: 'gemini', item: 'mcp atl', state: 'removed', detail: 'MCP server atl dropped from the Gemini extension', path: path.join(homes.gemini, 'extensions', 'atl', 'gemini-extension.json') })

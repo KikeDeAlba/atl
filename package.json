@@ -21,7 +21,9 @@
     "claude-code",
     "gemini-cli",
     "codex",
-    "opencode"
+    "opencode",
+    "antigravity",
+    "claude-desktop"
   ],
   "type": "module",
   "packageManager": "pnpm@11.22.0",
@@ -50,7 +52,7 @@
     "atl": "node src/bin/atl.ts"
   },
   "dependencies": {
-    "@kikedealba/kit": "^0.4.0",
+    "@kikedealba/kit": "^0.7.0",
     "@mixmark-io/domino": "^2.2.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "marked": "^18.1.0",

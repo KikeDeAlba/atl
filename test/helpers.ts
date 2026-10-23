@@ -65,6 +65,8 @@ export function cliEnv(dir: string): NodeJS.ProcessEnv {
     KIT_CREDENTIALS: 'file',
     KIT_REGISTRY_DIR: path.join(dir, 'registry'),
     XDG_CONFIG_HOME: dir,
+    XDG_DATA_HOME: path.join(dir, 'data'),
     APPDATA: dir,
+    LOCALAPPDATA: path.join(dir, 'data'),
   }
 }

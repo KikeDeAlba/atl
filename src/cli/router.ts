@@ -87,7 +87,7 @@ function help(): string {
     '  atl mcp token [--rotate]',
     '',
     'Setup:',
-    '  atl setup [--agents detected|all|claude,opencode,codex,gemini,claude-desktop] [--mcp none|stdio|http] [--no-desktop]',
+    `  atl setup [--agents detected|all|${agents.AGENTS.join(',')}] [--mcp none|stdio|http] [--no-desktop]`,
     '                                                         default: skill + CLI in coding agents, MCP in Claude Desktop',
     '                                                         --mcp applies to coding agents only; restart Claude Desktop after setup',
     '  atl uninstall',

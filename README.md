@@ -41,6 +41,7 @@ encuentre:
 | Claude Code | El plugin `atl` desde el marketplace `KikeDeAlba/atl` (`claude plugin marketplace add` + `claude plugin install atl@atl`), con la skill. |
 | opencode, Codex | La skill `atl`. |
 | Gemini CLI | La extensión `atl` con la skill. |
+| Antigravity CLI (`agy`) | El plugin `atl` con la skill y una regla `always_on` con su contenido, instalado con `agy plugin install`. |
 | Claude Desktop | El servidor MCP `atl` en `claude_desktop_config.json` (macOS y Windows). |
 
 La regla: **MCP en Claude Desktop, skill en los agentes de terminal**. Claude
@@ -50,11 +51,12 @@ que el comando arranque aunque las apps gráficas no hereden el `PATH` de la
 terminal. Reinicia Claude Desktop después de `atl setup` para que lo cargue.
 `atl setup --no-desktop` no lo toca y `atl uninstall` lo quita.
 
-En Claude Code, opencode, Codex y Gemini **no registra el servidor MCP** por
+En Claude Code, opencode, Codex, Gemini y Antigravity **no registra el servidor MCP** por
 defecto: el agente usa la CLI con la skill. Así no paga en cada sesión las definiciones de las 47
 herramientas (unos 8.000 tokens en clientes que las cargan todas al arrancar,
 como Codex u opencode). Si una instalación anterior había registrado el MCP de
-atl en Claude Code, Codex, opencode o Gemini, `atl setup` lo quita y lo reporta.
+atl en Claude Code, Codex, opencode, Gemini o Antigravity (`mcp_config.json`),
+`atl setup` lo quita y lo reporta.
 También quita los archivos sueltos que versiones anteriores dejaban en
 `~/.claude` (la skill enlazada y sus permisos), porque ahora los trae el plugin.
 
