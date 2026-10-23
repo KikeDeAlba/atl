@@ -10,7 +10,7 @@
       "name": "atl",
       "description": "Read, search, create and edit Jira issues and Confluence pages with the atl CLI, with compact JSON output",
       "source": "./",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "category": "productivity",
       "tags": ["atlassian", "jira", "confluence", "cli"]
     }
