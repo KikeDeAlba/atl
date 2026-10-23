@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { test } from 'node:test'
+import { agents } from '@kikedealba/kit'
 import { assertConformance } from '@kikedealba/kit/conformance'
 import { readManifest } from '@kikedealba/kit/registry'
 import { platformContext } from '@kikedealba/kit/platform'
@@ -62,7 +63,8 @@ test('a site added from the CLI is used by every command', async (t) => {
 test('setup --mcp stdio registers atl and its MCP server in the agents', async (t) => {
   const dir = await tempDir(t)
   const env = { ...cliEnv(dir), HOME: dir, USERPROFILE: dir, CLAUDE_CONFIG_DIR: path.join(dir, '.claude'), CODEX_HOME: path.join(dir, '.codex'), GEMINI_CLI_HOME: dir, PATH: path.dirname(process.execPath) }
-  const result = await atl(['setup', '--agents', 'codex,gemini', '--mcp', 'stdio', '--json'], env)
+  const targets = agents.AGENTS.filter((agent) => agent !== 'claude' && agent !== 'claude-desktop')
+  const result = await atl(['setup', '--agents', targets.join(','), '--mcp', 'stdio', '--json'], env)
   assert.equal(result.code, 0, result.stdout + result.stderr)
   const registered = await readManifest('atl', platformContext({ env, home: dir }))
   assert.ok(registered?.capabilities.includes('confluence.page.write'))
@@ -71,11 +73,15 @@ test('setup --mcp stdio registers atl and its MCP server in the agents', async (
   const extension = JSON.parse(await readFile(path.join(dir, '.gemini', 'extensions', 'atl', 'gemini-extension.json'), 'utf8'))
   assert.equal(extension.mcpServers.atl.args.at(-1), 'mcp')
   assert.ok(existsSync(path.join(dir, '.gemini', 'extensions', 'atl', 'skills', 'atl', 'SKILL.md')))
+  const antigravity = JSON.parse(await readFile(path.join(dir, '.gemini', 'config', 'mcp_config.json'), 'utf8'))
+  assert.equal(antigravity.mcpServers.atl.args.at(-1), 'mcp')
+  assert.ok(existsSync(path.join(dir, 'opencode', 'opencode.json')))
 
   const removed = await atl(['uninstall', '--json'], env)
   assert.equal(removed.code, 0)
   assert.equal(await readManifest('atl', platformContext({ env, home: dir })), null)
   assert.ok(!existsSync(path.join(dir, '.gemini', 'extensions', 'atl')))
+  assert.equal(JSON.parse(await readFile(path.join(dir, '.gemini', 'config', 'mcp_config.json'), 'utf8')).mcpServers.atl, undefined)
 })
 
 test('setup registers the command on PATH when it is this same atl', async (t) => {
@@ -98,11 +104,15 @@ test('setup by default installs the skill only and removes the MCP server a prev
   const env = { ...cliEnv(dir), HOME: dir, USERPROFILE: dir, CODEX_HOME: path.join(dir, '.codex'), KIT_AGENTS_HOME: path.join(dir, '.agents'), PATH: path.dirname(process.execPath) }
   await mkdir(path.join(dir, '.codex'), { recursive: true })
   await writeFile(path.join(dir, '.codex', 'config.toml'), '[mcp_servers.atl]\ncommand = "atl"\nargs = ["mcp"]\n')
-  const result = await atl(['setup', '--agents', 'codex', '--json'], env)
+  await mkdir(path.join(dir, '.gemini', 'config'), { recursive: true })
+  await writeFile(path.join(dir, '.gemini', 'config', 'mcp_config.json'), JSON.stringify({ mcpServers: { atl: { command: 'atl', args: ['mcp'], disabled: false, [agents.ANTIGRAVITY_MCP_MARKER]: 'atl' } } }))
+  const result = await atl(['setup', '--agents', 'codex,antigravity', '--json'], env)
   assert.equal(result.code, 0, result.stdout + result.stderr)
   const envelope = JSON.parse(result.stdout) as { data: { mcp: string; steps: Array<{ agent: string; item: string; state: string }> } }
   assert.equal(envelope.data.mcp, 'none')
   assert.ok(envelope.data.steps.some((step) => step.agent === 'codex' && step.item === 'mcp atl' && step.state === 'removed'))
+  assert.ok(envelope.data.steps.some((step) => step.agent === 'antigravity' && step.item === 'mcp atl' && step.state === 'removed'))
+  assert.deepEqual(JSON.parse(await readFile(path.join(dir, '.gemini', 'config', 'mcp_config.json'), 'utf8')).mcpServers, {})
   assert.doesNotMatch(await readFile(path.join(dir, '.codex', 'config.toml'), 'utf8'), /mcp_servers\.atl/)
   assert.ok(existsSync(path.join(dir, '.agents', 'skills', 'atl', 'SKILL.md')))
 })
@@ -156,4 +166,24 @@ test('setup rejects unknown agents', async (t) => {
   const result = await atl(['setup', '--agents', 'claude-dekstop', '--json'], env)
   assert.equal(result.code, 2, result.stdout + result.stderr)
   assert.match((JSON.parse(result.stdout) as { error: { message: string } }).error.message, /claude-desktop/)
+})
+
+test('help and README cover every agent kit supports', async (t) => {
+  const dir = await tempDir(t)
+  const help = await atl(['--help'], cliEnv(dir))
+  assert.equal(help.code, 0, help.stderr)
+  assert.ok(help.stdout.includes(`--agents detected|all|${agents.AGENTS.join(',')}`), help.stdout)
+  const labels: Record<(typeof agents.AGENTS)[number], string> = {
+    claude: 'Claude Code',
+    opencode: 'opencode',
+    codex: 'Codex',
+    gemini: 'Gemini CLI',
+    antigravity: 'Antigravity CLI',
+    'claude-desktop': 'Claude Desktop',
+  }
+  const readme = await readFile(path.join(path.dirname(BIN), '..', '..', 'README.md'), 'utf8')
+  const table = readme.split('\n').filter((line) => line.startsWith('| ')).join('\n')
+  for (const agent of agents.AGENTS) assert.ok(table.includes(labels[agent]), `README table misses ${agent}`)
+  const keywords = (JSON.parse(await readFile(path.join(path.dirname(BIN), '..', '..', 'package.json'), 'utf8')) as { keywords: string[] }).keywords
+  for (const agent of agents.AGENTS) assert.ok(keywords.some((keyword) => keyword.startsWith(agent)), `keywords miss ${agent}`)
 })

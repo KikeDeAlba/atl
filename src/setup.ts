@@ -60,6 +60,8 @@ export const CLAUDE_PLUGIN = { marketplace: 'KikeDeAlba/atl', marketplaceName: '
 
 export const SKILL_DIR = path.join(PACKAGE_ROOT, 'skills', 'atl')
 
+export const ANTIGRAVITY_RULES = path.join(PACKAGE_ROOT, 'rules', 'antigravity.md')
+
 const CLI_PERMISSIONS = [
   'Bash(atl site ls:*)',
   'Bash(atl jira issue get:*)',
@@ -103,6 +105,7 @@ export function integration(mode: McpMode, http?: { url: string; token: string |
     mcp: mcpServers(mode, http, bin),
     claude: { permissions: { allow: [...CLI_PERMISSIONS, ...MCP_PERMISSIONS] } },
     claudeDesktop: { mcp: [{ name: 'atl', command: [...desktopBin(bin), 'mcp'] }] },
+    antigravity: { rules: ANTIGRAVITY_RULES },
   }
 }
 
@@ -116,6 +119,8 @@ export interface AgentSetup extends agents.InstallOptions {
   bin?: readonly string[]
   desktop?: boolean
 }
+
+const STALE_MCP: agents.AgentIntegration = { tool: 'atl', version: VERSION, mcp: [{ name: 'atl', command: ['atl', 'mcp'] }] }
 
 async function hasCodexMcp(homes: agents.AgentHomes): Promise<boolean> {
   const file = path.join(homes.codex, 'config.toml')
@@ -148,14 +153,28 @@ async function hasGeminiMcp(homes: agents.AgentHomes): Promise<boolean> {
   }
 }
 
+async function hasAntigravityMcp(homes: agents.AgentHomes): Promise<boolean> {
+  const file = path.join(homes.antigravity, 'mcp_config.json')
+  if (!existsSync(file)) return false
+  try {
+    const value = JSON.parse(await readFile(file, 'utf8')) as { mcpServers?: Record<string, Record<string, unknown> | null> }
+    return value.mcpServers?.['atl']?.[agents.ANTIGRAVITY_MCP_MARKER] === 'atl'
+  } catch {
+    return false
+  }
+}
+
 async function removeStaleMcp(targets: readonly agents.AgentName[], homes: agents.AgentHomes, options: agents.InstallOptions): Promise<agents.Step[]> {
   const steps: agents.Step[] = []
   const stale: agents.AgentName[] = []
   if (targets.includes('codex') && (await hasCodexMcp(homes))) stale.push('codex')
   if (targets.includes('opencode') && (await hasOpenCodeMcp(homes))) stale.push('opencode')
   if (stale.length > 0) {
-    const only: agents.AgentIntegration = { tool: 'atl', version: VERSION, mcp: [{ name: 'atl', command: ['atl', 'mcp'] }] }
-    steps.push(...(await agents.uninstallIntegration(only, { ...options, agents: stale })))
+    steps.push(...(await agents.uninstallIntegration(STALE_MCP, { ...options, agents: stale })))
+  }
+  if (targets.includes('antigravity') && (await hasAntigravityMcp(homes))) {
+    const removed = await agents.uninstallIntegration(STALE_MCP, { ...options, agents: ['antigravity'], locate: async () => null })
+    steps.push(...removed.filter((step) => step.item === 'mcp atl'))
   }
   return steps
 }
@@ -173,10 +192,9 @@ export async function setupAgents(setup: AgentSetup): Promise<agents.Step[]> {
   if (selected.includes('claude')) {
     const plugin = await agents.installClaudePlugin(CLAUDE_PLUGIN, base)
     steps.push(...plugin)
-    const staleMcp: agents.AgentIntegration = { tool: 'atl', version: VERSION, mcp: [{ name: 'atl', command: ['atl', 'mcp'] }] }
     if (plugin.some((step) => step.state === 'failed' || step.state === 'unavailable')) {
       steps.push(...(await agents.installIntegration(integration(mode, http, bin), { ...base, agents: ['claude'] })))
-      if (mode === 'none') steps.push(...(await agents.removeLegacyClaude(staleMcp, base)))
+      if (mode === 'none') steps.push(...(await agents.removeLegacyClaude(STALE_MCP, base)))
     } else {
       const legacy = integration('stdio', undefined, bin)
       steps.push(...(await agents.removeLegacyClaude(mode === 'none' ? legacy : { ...legacy, mcp: [] }, base)))
