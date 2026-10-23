@@ -4,7 +4,7 @@ import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { test } from 'node:test'
 import { agents } from '@kikedealba/kit'
-import { platformContext } from '@kikedealba/kit/platform'
+import { dataHome, platformContext } from '@kikedealba/kit/platform'
 import { CLAUDE_PLUGIN, ANTIGRAVITY_RULES, SKILL_DIR, integration, setupAgents, uninstallAgents } from '../src/setup.ts'
 import { tempDir } from './helpers.ts'
 
@@ -16,7 +16,7 @@ interface Sandbox {
 
 async function sandbox(t: { after: (fn: () => Promise<void>) => void }, mcpRegistered = true, plugins = '[]'): Promise<Sandbox> {
   const dir = await tempDir(t)
-  const env = { HOME: dir, USERPROFILE: dir, CLAUDE_CONFIG_DIR: path.join(dir, '.claude'), CODEX_HOME: path.join(dir, '.codex'), XDG_CONFIG_HOME: path.join(dir, '.config'), XDG_DATA_HOME: path.join(dir, '.local', 'share'), GEMINI_CLI_HOME: dir, KIT_AGENTS_HOME: path.join(dir, '.agents') }
+  const env = { HOME: dir, USERPROFILE: dir, CLAUDE_CONFIG_DIR: path.join(dir, '.claude'), CODEX_HOME: path.join(dir, '.codex'), XDG_CONFIG_HOME: path.join(dir, '.config'), XDG_DATA_HOME: path.join(dir, '.local', 'share'), APPDATA: path.join(dir, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(dir, 'AppData', 'Local'), GEMINI_CLI_HOME: dir, KIT_AGENTS_HOME: path.join(dir, '.agents') }
   const calls: string[][] = []
   const exec = async (command: string, args: readonly string[]): Promise<string> => {
     calls.push([path.basename(command), ...args])
@@ -46,8 +46,8 @@ async function legacyInstall(dir: string): Promise<void> {
 
 const CODING_AGENTS = agents.AGENTS.filter((agent) => agent !== 'claude-desktop')
 
-function antigravityPlugin(dir: string): string {
-  return path.join(dir, '.local', 'share', 'kikedealba', 'agents', 'antigravity', 'atl')
+function antigravityPlugin(box: Sandbox): string {
+  return path.join(dataHome(box.options.ctx), 'kikedealba', 'agents', 'antigravity', 'atl')
 }
 
 test('setup installs the Claude Code plugin and drops every MCP server a previous install registered', async (t) => {
@@ -80,18 +80,18 @@ test('setup installs the Claude Code plugin and drops every MCP server a previou
   assert.ok(existsSync(path.join(box.dir, '.agents', 'skills', 'atl', 'SKILL.md')))
   assert.ok(existsSync(path.join(box.dir, '.config', 'opencode', 'skills', 'atl', 'SKILL.md')))
   assert.ok(existsSync(path.join(box.dir, '.gemini', 'extensions', 'atl', 'skills', 'atl', 'SKILL.md')))
-  assert.ok(existsSync(path.join(antigravityPlugin(box.dir), 'skills', 'atl', 'SKILL.md')))
+  assert.ok(existsSync(path.join(antigravityPlugin(box), 'skills', 'atl', 'SKILL.md')))
   assert.ok(!steps.some((step) => step.state === 'failed'), JSON.stringify(steps, null, 2))
 })
 
 test('setup gives Antigravity a short always_on rule that points to the skill', async (t) => {
   const box = await sandbox(t, false)
   const steps = await setupAgents({ mode: 'none', agents: ['antigravity'], ...box.options })
-  const rules = await readFile(path.join(antigravityPlugin(box.dir), 'rules', 'atl.md'), 'utf8')
+  const rules = await readFile(path.join(antigravityPlugin(box), 'rules', 'atl.md'), 'utf8')
   assert.equal(rules, `---\ntrigger: always_on\n---\n${await readFile(ANTIGRAVITY_RULES, 'utf8')}`)
   assert.ok(rules.includes('skill `atl`'))
   assert.ok(rules.trim().split('\n').length <= 7)
-  assert.ok(existsSync(path.join(antigravityPlugin(box.dir), 'skills', 'atl', 'SKILL.md')))
+  assert.ok(existsSync(path.join(antigravityPlugin(box), 'skills', 'atl', 'SKILL.md')))
   assert.ok(steps.some((step) => step.agent === 'antigravity' && step.item === 'plugin' && step.state === 'unavailable'))
   assert.ok(!steps.some((step) => step.item === 'mcp atl'))
 })
